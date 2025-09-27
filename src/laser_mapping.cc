@@ -172,7 +172,9 @@ bool LaserMapping::LoadParams() {
 
     this->declare_parameter<std::string>("common.lid_topic", "/livox/lidar");
     this->declare_parameter<std::string>("common.imu_topic", "/livox/imu");
-
+    
+    this->declare_parameter<double>("init.gravity_duration", 0.5);
+    this->get_parameter_or<double>("init.gravity_duration", gravity_init_duration_, 0.5);
     // nh.param<std::string>("common/lid_topic", lidar_topic, "/livox/lidar");
     // nh.param<std::string>("common/imu_topic", imu_topic, "/livox/imu");
 
@@ -371,7 +373,9 @@ void LaserMapping::Run() {
     if (!SyncPackages()) {
         return;
     }
-
+    if (!gravity_inited_) {
+        return;
+    }
     /// IMU process, kf prediction, undistortion
     p_imu_->Process(measures_, kf_, scan_undistort_);
     if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
@@ -512,6 +516,73 @@ void LaserMapping::LivoxPCLCallBack(const livox_ros_driver2::msg::CustomMsg::Con
     mtx_buffer_.unlock();
 }
 
+void LaserMapping::TryInitGravity(double imu_time, const sensor_msgs::msg::Imu &imu_msg) {
+    if (!gravity_init_started_) {
+        gravity_init_started_ = true;
+        gravity_init_t0_ = imu_time;
+        acc_sum_.setZero();
+        acc_count_ = 0;
+        LOG(INFO) << "[init] start collecting IMU for gravity, duration = " << gravity_init_duration_ << " s";
+    }
+
+    // 累加线加速度
+    Eigen::Vector3d acc(imu_msg.linear_acceleration.x,
+                        imu_msg.linear_acceleration.y,
+                        imu_msg.linear_acceleration.z);
+    acc_sum_ += acc;
+    acc_count_++;
+
+    const double dt = imu_time - gravity_init_t0_;
+    if (dt >= gravity_init_duration_ && acc_count_ >= 50) {
+        Eigen::Vector3d acc_avg = acc_sum_ / static_cast<double>(acc_count_);
+        ApplyInitialGravity(acc_avg);
+        gravity_inited_ = true;
+        LOG(INFO) << "[init] gravity initialized with " << acc_count_ << " samples in "
+                  << dt << " s. acc_avg = " << acc_avg.transpose();
+    }
+}
+
+
+void LaserMapping::ApplyInitialGravity(const Eigen::Vector3d &acc_avg) {
+    // 将机体系重力方向对齐到世界 -Z（锁定 roll/pitch, yaw=0）
+    Eigen::Vector3d g_b = acc_avg.normalized();
+    Eigen::Vector3d g_w(0.0, 0.0, -1.0);
+    Eigen::Quaterniond q_wb = Eigen::Quaterniond::FromTwoVectors(g_b, g_w);
+
+    state_point_.rot = q_wb;
+    state_point_.pos.setZero();
+
+    // 如果没有 ImuProcess 的初始化接口，这里什么也不需要做
+    // p_imu_->SetInitOrientation(q_wb); // ← 删掉这一行
+
+    euler_cur_ = SO3ToEuler(state_point_.rot);
+    pos_lidar_ = state_point_.pos + state_point_.rot * state_point_.offset_T_L_I;
+
+    path_.header.stamp = this->now();
+    path_.header.frame_id = "camera_init";
+}
+
+// void LaserMapping::IMUCallBack(const sensor_msgs::msg::Imu::ConstPtr &msg_in) {
+//     publish_count_++;
+//     sensor_msgs::msg::Imu::Ptr msg(new sensor_msgs::msg::Imu(*msg_in));
+
+//     if (abs(timediff_lidar_wrt_imu_) > 0.1 && time_sync_en_) {
+//         msg->header.stamp = common::get_ros_time(timediff_lidar_wrt_imu_ + common::toSec(msg_in->header.stamp));
+//     }
+
+//     double timestamp = common::toSec(msg->header.stamp);
+
+//     mtx_buffer_.lock();
+//     if (timestamp < last_timestamp_imu_) {
+//         LOG(WARNING) << "imu loop back, clear buffer";
+//         imu_buffer_.clear();
+//     }
+
+//     last_timestamp_imu_ = timestamp;
+//     imu_buffer_.emplace_back(msg);
+//     mtx_buffer_.unlock();
+// }
+
 void LaserMapping::IMUCallBack(const sensor_msgs::msg::Imu::ConstPtr &msg_in) {
     publish_count_++;
     sensor_msgs::msg::Imu::Ptr msg(new sensor_msgs::msg::Imu(*msg_in));
@@ -521,6 +592,12 @@ void LaserMapping::IMUCallBack(const sensor_msgs::msg::Imu::ConstPtr &msg_in) {
     }
 
     double timestamp = common::toSec(msg->header.stamp);
+
+    // --- 收集加速度样本以估计重力方向 ---
+    if (!gravity_inited_) {
+        TryInitGravity(timestamp, *msg);
+        // 不 return；仍将该 IMU 塞入队列，保持原逻辑一致
+    }
 
     mtx_buffer_.lock();
     if (timestamp < last_timestamp_imu_) {

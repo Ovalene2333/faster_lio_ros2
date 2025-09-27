@@ -1,14 +1,14 @@
 #ifndef FASTER_LIO_LASER_MAPPING_H
 #define FASTER_LIO_LASER_MAPPING_H
 
+#include <pcl/filters/voxel_grid.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <condition_variable>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <nav_msgs/msg/path.hpp>
-#include <pcl/filters/voxel_grid.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include <condition_variable>
 #include <thread>
-#include <tf2_ros/transform_broadcaster.h>
 
 #include "imu_processing.hpp"
 #include "ivox3d/ivox3d.h"
@@ -27,7 +27,7 @@ class LaserMapping : public rclcpp::Node {
     using IVoxType = IVox<3, IVoxNodeType::DEFAULT, PointType>;
 #endif
 
-    LaserMapping(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
+    LaserMapping(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
     ~LaserMapping() {
         scan_down_body_ = nullptr;
         scan_undistort_ = nullptr;
@@ -59,7 +59,8 @@ class LaserMapping : public rclcpp::Node {
     void PublishOdometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pub_odom_aft_mapped);
     void PublishFrameWorld();
     void PublishFrameBody(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_body);
-    void PublishFrameEffectWorld(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_effect_world);
+    void PublishFrameEffectWorld(
+        const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_effect_world);
     void Savetrajectory(const std::string &traj_file);
 
     void Finish();
@@ -178,6 +179,19 @@ class LaserMapping : public rclcpp::Node {
     PointCloudType::Ptr pcl_wait_save_{new PointCloudType()};  // debug save
     nav_msgs::msg::Path path_;
     geometry_msgs::msg::PoseStamped msg_body_pose_;
+
+    /// --- Gravity init ---
+    bool gravity_inited_ = false;
+    bool gravity_init_started_ = false;
+    double gravity_init_duration_ = 1.0;  // seconds, 可通过参数覆盖
+    double gravity_init_t0_ = 0.0;
+    Eigen::Vector3d acc_sum_ = Eigen::Vector3d::Zero();
+    size_t acc_count_ = 0;
+
+    // class LaserMapping 私有成员里：
+    void TryInitGravity(double imu_time, const sensor_msgs::msg::Imu &imu_msg);
+    void ApplyInitialGravity(const Eigen::Vector3d &acc_avg);
+
 };
 
 }  // namespace faster_lio
