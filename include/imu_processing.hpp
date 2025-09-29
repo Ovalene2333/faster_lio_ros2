@@ -143,22 +143,22 @@ void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf<state_
 
         N++;
     }
-    state_ikfom init_state = kf_state.get_x();
-    init_state.grav = S2(-mean_acc_ / mean_acc_.norm() * common::G_m_s2);
+    // state_ikfom init_state = kf_state.get_x();
+    // init_state.grav = S2(-mean_acc_ / mean_acc_.norm() * common::G_m_s2);
 
-    init_state.bg = mean_gyr_;
-    init_state.offset_T_L_I = Lidar_T_wrt_IMU_;
-    init_state.offset_R_L_I = Lidar_R_wrt_IMU_;
-    kf_state.change_x(init_state);
+    // init_state.bg = mean_gyr_;
+    // init_state.offset_T_L_I = Lidar_T_wrt_IMU_;
+    // init_state.offset_R_L_I = Lidar_R_wrt_IMU_;
+    // kf_state.change_x(init_state);
 
-    esekfom::esekf<state_ikfom, 12, input_ikfom>::cov init_P = kf_state.get_P();
-    init_P.setIdentity();
-    init_P(6, 6) = init_P(7, 7) = init_P(8, 8) = 0.00001;
-    init_P(9, 9) = init_P(10, 10) = init_P(11, 11) = 0.00001;
-    init_P(15, 15) = init_P(16, 16) = init_P(17, 17) = 0.0001;
-    init_P(18, 18) = init_P(19, 19) = init_P(20, 20) = 0.001;
-    init_P(21, 21) = init_P(22, 22) = 0.00001;
-    kf_state.change_P(init_P);
+    // esekfom::esekf<state_ikfom, 12, input_ikfom>::cov init_P = kf_state.get_P();
+    // init_P.setIdentity();
+    // init_P(6, 6) = init_P(7, 7) = init_P(8, 8) = 0.00001;
+    // init_P(9, 9) = init_P(10, 10) = init_P(11, 11) = 0.00001;
+    // init_P(15, 15) = init_P(16, 16) = init_P(17, 17) = 0.0001;
+    // init_P(18, 18) = init_P(19, 19) = init_P(20, 20) = 0.001;
+    // init_P(21, 21) = init_P(22, 22) = 0.00001;
+    // kf_state.change_P(init_P);
     last_imu_ = meas.imu_.back();
 }
 
@@ -250,7 +250,6 @@ void ImuProcess::UndistortPcl(const common::MeasureGroup &meas, esekfom::esekf<s
     for (auto it_kp = IMUpose_.end() - 1; it_kp != IMUpose_.begin(); it_kp--) {
         auto head = it_kp - 1;
         auto tail = it_kp;
-        // std::vector<double> v_R_imu_ = head->rot;
         R_imu = common::MatFromArray(head->rot);
         vel_imu = common::VecFromArray(head->vel);
         pos_imu = common::VecFromArray(head->pos);
@@ -285,6 +284,38 @@ void ImuProcess::UndistortPcl(const common::MeasureGroup &meas, esekfom::esekf<s
     }
 }
 
+// void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state,
+//                          PointCloudType::Ptr cur_pcl_un_) {
+//     if (meas.imu_.empty()) {
+//         return;
+//     }
+
+//     ROS_ASSERT(meas.lidar_ != nullptr);
+
+//     if (imu_need_init_) {
+//         /// The very first lidar frame
+//         IMUInit(meas, kf_state, init_iter_num_);
+
+//         imu_need_init_ = true;
+
+//         last_imu_ = meas.imu_.back();
+
+//         state_ikfom imu_state = kf_state.get_x();
+//         if (init_iter_num_ > MAX_INI_COUNT) {
+//             cov_acc_ *= pow(common::G_m_s2 / mean_acc_.norm(), 2);
+//             imu_need_init_ = false;
+
+//             cov_acc_ = cov_acc_scale_;
+//             cov_gyr_ = cov_gyr_scale_;
+//             LOG(INFO) << "IMU Initial Done";
+//             fout_imu_.open(common::DEBUG_FILE_DIR("imu_.txt"), std::ios::out);
+//         }
+
+//         return;
+//     }
+
+//     Timer::Evaluate([&, this]() { UndistortPcl(meas, kf_state, *cur_pcl_un_); }, "Undistort Pcl");
+// }
 void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state,
                          PointCloudType::Ptr cur_pcl_un_) {
     if (meas.imu_.empty()) {
@@ -294,22 +325,52 @@ void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_
     // ROS_ASSERT(meas.lidar_ != nullptr);
 
     if (imu_need_init_) {
-        /// The very first lidar frame
+        /// 调用IMUInit函数进行数据采集和均值计算
         IMUInit(meas, kf_state, init_iter_num_);
-
-        imu_need_init_ = true;
 
         last_imu_ = meas.imu_.back();
 
-        state_ikfom imu_state = kf_state.get_x();
+        // 当收集到足够多的IMU数据后
         if (init_iter_num_ > MAX_INI_COUNT) {
+            /// [新增] 重力对齐计算
+            // 1. 定义世界坐标系下的目标重力向量
+            const common::V3D gravity_world(0.0, 0.0, -common::G_m_s2);
+
+            // 2. 根据测量均值计算IMU机体坐标系下的重力向量
+            //    注意：加速度计测量值与重力方向相反，因此需要取负号
+            common::V3D gravity_body = -mean_acc_.normalized();
+
+            // 3. 计算从机体坐标系旋转到世界坐标系的旋转矩阵
+            //    我们使用 Eigen::Quaterniond::FromTwoVectors 来安全、稳定地计算这个旋转。
+            //    它寻找一个最短路径旋转，将 gravity_body 向量旋转到 gravity_world.normalized() 向量。
+            Eigen::Quaterniond rot_init_q =
+                Eigen::Quaterniond::FromTwoVectors(gravity_body, gravity_world.normalized());
+            common::M3D rot_init = rot_init_q.toRotationMatrix();
+
+            /// [修改] 使用计算出的旋转来初始化ESEKF状态
+            state_ikfom imu_state = kf_state.get_x();
+
+            // 设置初始旋转
+            imu_state.rot = rot_init;
+            // 设置陀螺仪零偏
+            imu_state.bg = mean_gyr_;
+            // 世界系已经对齐，重力向量现在是固定值
+            imu_state.grav = S2(gravity_world);
+
+            // 将更新后的状态应用到滤波器
+            kf_state.change_x(imu_state);
+
+            // [修改] 调整协方差矩阵的尺度
             cov_acc_ *= pow(common::G_m_s2 / mean_acc_.norm(), 2);
-            imu_need_init_ = false;
+            // imu_need_init_ = false; // 这行移动到后面
 
             cov_acc_ = cov_acc_scale_;
             cov_gyr_ = cov_gyr_scale_;
-            LOG(INFO) << "IMU Initial Done";
+            LOG(INFO) << "IMU Initial Done with Gravity-Alignment. Initial Rotation:\n" << rot_init;
             fout_imu_.open(common::DEBUG_FILE_DIR("imu_.txt"), std::ios::out);
+
+            // 标记初始化完成
+            imu_need_init_ = false;
         }
 
         return;
