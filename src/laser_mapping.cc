@@ -134,6 +134,7 @@ bool LaserMapping::LoadParams() {
     this->declare_parameter<bool>("mapping.extrinsic_est_en", true);
     this->declare_parameter<bool>("pcd_save.pcd_save_en", false);
     this->declare_parameter<int>("pcd_save.interval", -1);
+    this->declare_parameter<std::string>("pcd_save.file_path", std::string("PCD/scans.pcd"));
     this->declare_parameter<std::vector<double>>("mapping.extrinsic_T", std::vector<double>());
     this->declare_parameter<std::vector<double>>("mapping.extrinsic_R", std::vector<double>());
 
@@ -147,6 +148,7 @@ bool LaserMapping::LoadParams() {
     this->get_parameter_or<bool>("mapping.extrinsic_est_en", extrinsic_est_en_, true);
     this->get_parameter_or<bool>("pcd_save.pcd_save_en",pcd_save_en_, false);
     this->get_parameter_or<int>("pcd_save.interval",pcd_save_interval_, -1);
+    this->get_parameter_or<std::string>("pcd_save.file_path", pcd_save_file_path_, std::string("PCD/scans.pcd"));
     this->get_parameter_or<std::vector<double>>("mapping.extrinsic_T", extrinT_, std::vector<double>());
     this->get_parameter_or<std::vector<double>>("mapping.extrinsic_R", extrinR_, std::vector<double>());
     // nh.param<double>("preprocess/blind", preprocess_->Blind(), 0.01);
@@ -262,6 +264,9 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         extrinsic_est_en_ = yaml["mapping"]["extrinsic_est_en"].as<bool>();
         pcd_save_en_ = yaml["pcd_save"]["pcd_save_en"].as<bool>();
         pcd_save_interval_ = yaml["pcd_save"]["interval"].as<int>();
+        if (yaml["pcd_save"]["file_path"]) {
+            pcd_save_file_path_ = yaml["pcd_save"]["file_path"].as<std::string>("PCD/scans.pcd");
+        }
         extrinT_ = yaml["mapping"]["extrinsic_T"].as<std::vector<double>>();
         extrinR_ = yaml["mapping"]["extrinsic_R"].as<std::vector<double>>();
 
@@ -1041,10 +1046,11 @@ void LaserMapping::Finish() {
     /* 1. make sure you have enough memories
     /* 2. pcd save will largely influence the real-time performences **/
     if (pcl_wait_save_->size() > 0 && pcd_save_en_) {
-        std::string file_name = std::string("scans.pcd");
-        std::string all_points_dir(std::string(std::string(ROOT_DIR) + "PCD/") + file_name);
+        // Use configured path; absolute as-is, otherwise relative to ROOT_DIR
+        std::string target = pcd_save_file_path_.empty() ? std::string("PCD/scans.pcd") : pcd_save_file_path_;
+        std::string all_points_dir = (target.size() > 0 && target[0] == '/') ? target : std::string(ROOT_DIR) + target;
         pcl::PCDWriter pcd_writer;
-        LOG(INFO) << "current scan saved to /PCD/" << file_name;
+        LOG(INFO) << "current scan saved to " << all_points_dir;
         pcd_writer.writeBinary(all_points_dir, *pcl_wait_save_);
     }
 

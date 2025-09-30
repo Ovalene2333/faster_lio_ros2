@@ -175,6 +175,7 @@ class LaserMapping : public rclcpp::Node {
     int pcd_save_interval_ = -1;
     bool path_save_en_ = false;
     std::string dataset_;
+    std::string pcd_save_file_path_;
 
     PointCloudType::Ptr pcl_wait_save_{new PointCloudType()};  // debug save
     nav_msgs::msg::Path path_;
