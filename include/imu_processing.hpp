@@ -361,7 +361,9 @@ void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_
             kf_state.change_x(imu_state);
 
             // [修改] 调整协方差矩阵的尺度
-            cov_acc_ *= pow(common::G_m_s2 / mean_acc_.norm(), 2);
+            auto scale = pow(1.0 / mean_acc_.norm(), 2);
+            cov_acc_ *= scale;
+            LOG(INFO) << "cov_acc_scale\n" << scale;
             // imu_need_init_ = false; // 这行移动到后面
 
             cov_acc_ = cov_acc_scale_;
