@@ -14,6 +14,9 @@
 #include "ivox3d/ivox3d.h"
 #include "options.h"
 #include "pointcloud_preprocess.h"
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/common/transforms.h>
 
 namespace faster_lio {
 
@@ -56,8 +59,14 @@ class LaserMapping : public rclcpp::Node {
 
     ////////////////////////////// debug save / show ////////////////////////////////////////////////////////////////
     void PublishPath(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path);
+
     void PublishOdometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pub_odom_aft_mapped);
+    void PublishOdometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pub_odom_aft_mapped,
+                         const Eigen::Quaterniond &rot_align);
+
     void PublishFrameWorld();
+    void PublishFrameWorld(const Eigen::Quaterniond &rot_align);
+
     void PublishFrameBody(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_body);
     void PublishFrameEffectWorld(
         const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_effect_world);
@@ -192,7 +201,6 @@ class LaserMapping : public rclcpp::Node {
     // class LaserMapping 私有成员里：
     void TryInitGravity(double imu_time, const sensor_msgs::msg::Imu &imu_msg);
     void ApplyInitialGravity(const Eigen::Vector3d &acc_avg);
-
 };
 
 }  // namespace faster_lio
