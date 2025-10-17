@@ -139,8 +139,11 @@ bool LaserMapping::LoadParams() {
     this->declare_parameter<std::string>("common.lid_topic", "/livox/lidar");
     this->declare_parameter<std::string>("common.imu_topic", "/livox/imu");
 
-    this->declare_parameter<double>("init.gravity_duration", 0.5);
-    this->get_parameter_or<double>("init.gravity_duration", gravity_init_duration_, 0.5);
+    // 说明,理论上来说这个bias是不需要加的,重力计算出的角度和camera_init->body的角度是几乎一致的,但点云仍然是歪的,唯一可能的原因就是雷达的外参有问题(有微小偏差)
+    this->declare_parameter<double>("align_gravity.roll_bias", 0.0);
+    this->declare_parameter<double>("align_gravity.pitch_bias", 0.0);
+    this->get_parameter_or<double>("align_gravity.roll_bias", align_roll_bias_, 0.0);
+    this->get_parameter_or<double>("align_gravity.pitch_bias", align_pitch_bias_, 0.0);
 
     LOG(INFO) << "lidar_type " << lidar_type;
     if (lidar_type == 1) {
@@ -231,6 +234,8 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
         ivox_options_.resolution_ = yaml["ivox_grid_resolution"].as<float>();
         ivox_nearby_type = yaml["ivox_nearby_type"].as<int>();
+        align_roll_bias_ = yaml["align_gravity"]["roll_bias"].as<double>(0.0);
+        align_pitch_bias_ = yaml["align_gravity"]["pitch_bias"].as<double>(0.0);
     } catch (...) {
         LOG(ERROR) << "bad conversion";
         return false;
@@ -402,6 +407,11 @@ void LaserMapping::Run() {
     //    使用 FromTwoVectors 可以稳健地处理各种情况
     //    注意：重力向量是指向下的，所以“向上”的向量是 -gravity_vec
     Eigen::Quaterniond rot_align = Eigen::Quaterniond::FromTwoVectors(-gravity_vec.normalized(), target_z_axis);
+
+    // 4. 应用额外的旋转偏置
+    Eigen::AngleAxisd roll_bias(align_roll_bias_, Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitch_bias(align_pitch_bias_, Eigen::Vector3d::UnitY());
+    rot_align = rot_align * pitch_bias * roll_bias;
     /*************************************************************************/
 
     // update local map

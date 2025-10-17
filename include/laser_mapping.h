@@ -191,12 +191,8 @@ class LaserMapping : public rclcpp::Node {
     geometry_msgs::msg::PoseStamped msg_body_pose_;
 
     /// --- Gravity init ---
-    bool gravity_inited_ = false;
-    bool gravity_init_started_ = false;
-    double gravity_init_duration_ = 1.0;  // seconds, 可通过参数覆盖
-    double gravity_init_t0_ = 0.0;
-    Eigen::Vector3d acc_sum_ = Eigen::Vector3d::Zero();
-    size_t acc_count_ = 0;
+    double align_roll_bias_;
+    double align_pitch_bias_;
 
     // class LaserMapping 私有成员里：
     void TryInitGravity(double imu_time, const sensor_msgs::msg::Imu &imu_msg);
